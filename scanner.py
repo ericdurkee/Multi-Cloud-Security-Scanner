@@ -11,6 +11,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Automated Cloud Security Compliance Scanner")
     parser.add_argument("--region", default="us-east-1", help="Target AWS region or 'all' for multi-region scan")
     parser.add_argument("--profile", default=None, help="AWS CLI profile to use")
+    parser.add_argument("--auto-remediate", action="store_true", help="Automatically remediate critical/failing findings")
     return parser.parse_args()
 
 from checks.iam import (key_creation_date, list_iam_users, has_mfa_enabled, has_console_access, list_access_keys, has_admin_access, get_last_key_usage, active_key_count, inline_policy_count,
@@ -29,6 +30,7 @@ from reporter import save_scan_report, print_risk_table, save_html_report
 from utils.notifier import send_discord_alert
 from utils.db import save_scan_to_db, calculate_drift
 from utils.compliance import evaluate_compliance
+from utils.remediator import remediate_finding
 
 def main():
     print("\n=================================")
@@ -508,6 +510,19 @@ def main():
 
     compliance_scores = evaluate_compliance(flat_findings_list)
     save_scan_to_db(totals_dict, flat_findings_list)
+
+    # --- AUTO-REMEDIATION ---
+    if args.auto_remediate:
+        print(f"\n{Fore.MAGENTA}=== Active Defense / Auto-Remediation Mode Enabled ==={Style.RESET_ALL}")
+        remediated_count = 0
+        for finding in flat_findings_list:
+            if finding.get("status") == "FAIL" and finding.get("severity") == "CRITICAL":
+                success = remediate_finding(finding)
+                if success:
+                    remediated_count +=1
+        print(f"\n{Fore.GREEN}[INFO] Auto-remediation cycle complete. Successfully remediated {remediated_count} critical finding(s).{Style.RESET_ALL}")
+    else:
+        print(f"\n{Fore.BLUE}[INFO] Running in Audit-Only mode. Pass --auto-remediate to enable active self-healing.{Style.RESET_ALL}")
 
     drift = calculate_drift(flat_findings_list)
     if drift:
